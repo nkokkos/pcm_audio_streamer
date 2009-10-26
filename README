@@ -1,5 +1,5 @@
 PCM Real Audio Streamer + Client is a set of 2 windows applications that stream 
-CD quality audio (44100 khz, 16 bit,2 channels) over the network and 
+CD quality audio (44100 samples/sec, 16 bit,2 channels) over the network and 
 perform playback at the same time (client).
 
 Streamer streams the file over tcp/ip using only UTP/RTP protocol to the client
