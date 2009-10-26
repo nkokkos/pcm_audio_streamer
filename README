@@ -1,0 +1,29 @@
+PCM Real Audio Streamer + Client is a set of 2 windows applications that stream 
+CD quality audio (44100 khz, 16 bit,2 channels) over the network and 
+perform playback at the same time (client).
+
+Streamer streams the file over tcp/ip using only UTP/RTP protocol to the client
+PC that runs the client application. Streamer uses an adaptive algorithm, which is 
+based on the real playout time of each packet that leaves the server, in order to
+stream the file to the client station.
+
+Client application assembles the packets received into blocks which are subsequently 
+pushed onto the sound card for playout. Client uses a classic cyclic buffer for 
+buffering and playout. 
+
+Currently these two applications work only on windows systems. 
+
+Streamer was highly influenced to a great extent by this great work of
+Nicholas J Humfrey's work: http://www.aelius.com/njh/pcm6cast/old/
+
+Client was also based on David Overton's great article about playing audio on 
+windows using waveout function calls : 
+http://www.planet-source-code.com/vb/scripts/ShowCode.asp?txtCodeId=4422&lngWId=3
+
+Copyright (c) 2005-2006 Nick Kokkos <nkokkos@gmail.com>
+Released under the GNU licence
+
+
+
+
+ 

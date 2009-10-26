@@ -1,0 +1,5 @@
+// Microsoft Developer Studio generated Help ID include file.
+// Used by udp.rc
+//
+#define HIDC_STATUS2                    0x806503ec    // IDD_DIALOG1 [Unknown language: 0xD, 0x1]
+#define HIDC_Status                     0x806503ea    // IDD_DIALOG1 [Unknown language: 0xD, 0x1]

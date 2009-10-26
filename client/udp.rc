@@ -1,0 +1,170 @@
+//Microsoft Developer Studio generated resource script.
+//
+#include "resource.h"
+
+// Generated Help ID header file
+#define APSTUDIO_HIDDEN_SYMBOLS
+#include "resource.hm"
+#undef APSTUDIO_HIDDEN_SYMBOLS
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#include "afxres.h"
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+// Unknown language: 0xD, 0x1 resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_HEB)
+#ifdef _WIN32
+LANGUAGE 0xD, 0x1
+#pragma code_page(1255)
+#endif //_WIN32
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "#include ""afxres.h""\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+IDD_DIALOG1 DIALOGEX 0, 0, 384, 247
+STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "PCM Real Streaming Audio Client"
+FONT 8, "MS Sans Serif"
+BEGIN
+    DEFPUSHBUTTON   "Quit",IDC_Quit,326,225,50,15
+    DEFPUSHBUTTON   "Connect",IDC_CONNECT,326,189,50,15
+    EDITTEXT        IDC_Status,140,222,28,18,ES_CENTER | ES_UPPERCASE | 
+                    ES_AUTOHSCROLL | WS_DISABLED,WS_EX_DLGMODALFRAME,
+                    HIDC_Status
+    LTEXT           "BlockSize (=number of packets)",IDC_STATIC,66,21,100,8
+    CONTROL         "Progress2",IDC_PROGRESS2,"msctls_progress32",
+                    WS_DISABLED | WS_BORDER,170,223,149,17,
+                    WS_EX_DLGMODALFRAME
+    COMBOBOX        IDC_BlockSize,15,17,48,85,CBS_DROPDOWN | CBS_SORT | 
+                    WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_BlockCount,15,31,48,84,CBS_DROPDOWN | CBS_SORT | 
+                    WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Number of Blocks",IDC_STATIC,65,34,100,8
+    COMBOBOX        IDC_PacketPayload,15,46,48,92,CBS_DROPDOWN | CBS_SORT | 
+                    WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Packet Payload (Bytes)",IDC_STATIC,65,48,100,8
+    GROUPBOX        "Buffer Setup",IDC_STATIC,7,7,164,61
+    EDITTEXT        IDC_this,17,84,56,14,ES_AUTOHSCROLL
+    EDITTEXT        IDC_diff,17,118,56,14,ES_AUTOHSCROLL
+    EDITTEXT        IDC_last,17,102,56,14,ES_AUTOHSCROLL
+    GROUPBOX        "Missing/Out of Sequence  Packets",IDC_STATIC,7,73,127,
+                    80
+    LTEXT           "This Sequence number",IDC_STATIC,75,87,52,8
+    LTEXT           "Last Sequence Number",IDC_STATIC,75,105,48,8
+    LTEXT           "Difference",IDC_STATIC,75,120,48,8
+    LTEXT           "Samples Per Second",IDC_STATIC,245,21,75,8
+    COMBOBOX        IDC_Samples_Per_Second,194,17,48,85,CBS_DROPDOWN | 
+                    CBS_SORT | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_Bits_Per_Sample,194,31,48,84,CBS_DROPDOWN | CBS_SORT | 
+                    WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Bits Per Sample",IDC_STATIC,244,34,64,8
+    COMBOBOX        IDC_Channels,194,46,48,92,CBS_DROPDOWN | CBS_SORT | 
+                    WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Number of Channels",IDC_STATIC,244,48,76,8
+    GROUPBOX        "Sound Card Stream Setup",IDC_STATIC,185,7,149,61
+    EDITTEXT        IDC_Local_Port,326,172,50,14,ES_CENTER | ES_AUTOHSCROLL
+    CTEXT           "Local Port To Connect to:",IDC_STATIC,324,151,45,18
+    LTEXT           "Buffer State:",IDC_STATIC,217,214,41,8
+    EDITTEXT        ID_Timer,17,193,58,14,ES_CENTER | ES_AUTOHSCROLL | 
+                    WS_DISABLED
+    LTEXT           "Bytes / Sec Received:",IDC_STATIC,17,183,73,8
+    DEFPUSHBUTTON   "Disconnect",IDC_STOP,326,204,50,15
+    EDITTEXT        IDC_PayloadSize,147,81,70,14,ES_AUTOHSCROLL
+    LTEXT           "Payload Size (bytes)",IDC_STATIC,221,84,74,8
+    EDITTEXT        IDC_Difference,147,113,70,14,ES_AUTOHSCROLL
+    EDITTEXT        IDC_Average,147,131,70,14,ES_AUTOHSCROLL
+    LTEXT           "Interarrival Difference (msec)",IDC_STATIC,220,117,90,8
+    LTEXT           "Average Interarrival (msec)",IDC_STATIC,221,129,71,18
+    GROUPBOX        "Debug View..",IDC_STATIC,138,72,186,107
+    EDITTEXT        IDC_lost_packets,17,135,56,14,ES_AUTOHSCROLL
+    LTEXT           "Lost Packets",IDC_STATIC,75,137,44,8
+    CONTROL         "Debug View - Check before ""Connect"" to enable",
+                    IDC_DEBUG_VIEW,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,147,
+                    167,170,9
+    EDITTEXT        IDC_SOUND_STATUS,17,224,72,16,ES_AUTOHSCROLL | 
+                    WS_DISABLED
+    LTEXT           "Free Blocks:",IDC_STATIC,136,214,41,8
+    LTEXT           "Sound Card Status:",IDC_STATIC,17,215,62,8
+    EDITTEXT        IDC_PacketReceived,148,149,70,13,ES_CENTER | 
+                    ES_AUTOHSCROLL | WS_DISABLED
+    CONTROL         "WSAAsyncSelect: Windows Non Blocking thread",
+                    IDC_WSAAsyncSelect,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,
+                    148,188,169,9
+    LTEXT           "Packets Received",IDC_STATIC,221,150,70,8
+    EDITTEXT        IDC_Sequence,147,97,70,14,ES_AUTOHSCROLL
+    LTEXT           "Sequence",IDC_STATIC,221,100,67,8
+    EDITTEXT        IDC_SecondsPassed,327,132,41,13,ES_CENTER | 
+                    ES_AUTOHSCROLL | WS_DISABLED
+    CTEXT           "Secs Passed",IDC_STATIC,325,118,45,11
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO DISCARDABLE 
+BEGIN
+    IDD_DIALOG1, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 376
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 240
+    END
+END
+#endif    // APSTUDIO_INVOKED
+
+#endif    // Unknown language: 0xD, 0x1 resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+

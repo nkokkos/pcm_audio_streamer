@@ -1,0 +1,1041 @@
+// server.cpp : Defines the entry point for the application.
+
+
+#include	"stdafx.h"
+
+#include	"resource.h"
+#include	<windows.h>
+#include	"Wav_Header.h"
+
+
+#include	"Commdlg.h" // <-- used for OPENFILE DIALOG procedures
+#include	<stdio.h>
+
+#include	<commctrl.h>
+
+#include	<stdlib.h>
+#include	<string.h> 
+#include	<time.h> 
+#include	<winsock.h>  
+#include	<time.h>
+#include	<malloc.h>
+  
+
+#include	<mmsystem.h>
+#include	<mmreg.h>
+
+
+#define		WM_SOCKETREAD			(WM_APP + 100)
+
+
+// #define		PAYLOAD_SIZE			1280
+
+static int	PAYLOAD_SIZE;
+
+
+///////////////////////// RTP HEADER /////////////////////////////////////////////
+
+
+typedef struct  _rtp_hrt_t{
+	 
+       unsigned int version:2;   // protocol version 
+       unsigned int p:1;         // padding flag 
+       unsigned int x:1;         // header extension flag 
+       unsigned int cc:4;        // CSRC count 
+       unsigned int m:1;         // marker bit 
+       unsigned int pt:7;        // payload type 
+       unsigned int seq:16;		 // sequence number
+	   unsigned int ts:32;		// time stamp 
+	   unsigned long ssrc:32;		//	synchronization source    
+ //		optional CSRC list 
+ //   unsigned long csrc[1];  
+
+}rtp_hrt_t;
+ 
+
+///////////////////////////////////////////////////////////////
+
+typedef struct _Packet{
+ 	unsigned char buffer[1500];
+    unsigned int  bufferlen;
+
+}Packet;
+
+////////////////////////////////////////////////////////////////
+
+
+typedef struct _File_To_Stream {
+
+	unsigned int	numblocks;
+	unsigned int	remaining_bytes;	// refers to the last packet to send
+
+	char			FilePath[1024];
+	bool			File_Loaded;
+	bool			sending_file;		// used to indicate if the file is being sent now or not
+	unsigned int	file_size;			// file size minus wav_header ( 44 bytes)
+	Wav_Header		wav_header;
+
+
+} File_To_Stream;
+
+
+static	Packet		*outpdata = new  Packet [sizeof(outpdata)];
+static 	rtp_hrt_t	*header=	new  rtp_hrt_t[sizeof(header) ];
+
+//////////////////////////////////////////////////////////////////////
+
+DWORD WINAPI SendPacketsFromFile(LPVOID lParam);
+
+// main thread to send packet from file ...
+
+////////////////////// StreamServerDialog  CLASS///////////////////////
+
+
+class StreamServerDialog {
+
+public:
+
+		HWAVEOUT			hWaveOut;			// handle to playback device	
+		HWND				DialogHandle;		// handle to Dialog window
+		
+		SOCKET				my_socket;			// socket to use 
+		struct sockaddr_in	SockAddr;		
+
+		HANDLE				hFile;				// handle to file to be streamed 
+		
+		File_To_Stream		my_File_To_Stream;
+
+		HANDLE				hThread;			// thread to start 
+												
+		DWORD				dwThreadId;
+
+		unsigned int		bytes_sent;			// used for measuring throughput
+		unsigned int		seconds_elapsed;	// used for measuring throughput
+			
+		HANDLE				hMutexStopButton;
+		bool				StopButton;
+
+
+/////////////////////////// CLASS METHODS ///////////////////////////////////////////////////
+
+
+
+// Return the difference between two times as microseconds 
+
+long StreamServerDialog::diff_timeval(struct timeval * ep, struct timeval * sp)
+{
+        if (sp->tv_usec > ep->tv_usec) 
+		{
+                ep->tv_usec += 1000000;
+                --ep->tv_sec;
+        }
+        return ((ep->tv_sec - sp->tv_sec) * 1000000L) +
+            (ep->tv_usec - sp->tv_usec);
+} 
+
+//////////////////////////////////////////////////////////////////////
+// Add microseconds to a timeval 
+
+void StreamServerDialog::add_usec2timeval( struct timeval * tv, long add )
+{
+	tv->tv_usec += add;
+
+	// Don't let usec overflow 
+	while (tv->tv_usec > 1000000) 
+	{
+		tv->tv_sec++;
+		tv->tv_usec -= 1000000;
+	}
+}
+
+//////////////////////////////////////////////////////////////////////
+
+int StreamServerDialog::gettimeofday(struct timeval* tp) {
+    DWORD t;
+    t = timeGetTime();
+    tp->tv_sec = t / 1000;
+    tp->tv_usec = t % 1000;
+    // 0 indicates that the call succeeded. 
+    return 0;
+}
+
+
+
+//////////////////////////////////////////////////////////////////////////////
+
+void StreamServerDialog::OnGetFile(StreamServerDialog *pParam)
+{
+
+
+	StreamServerDialog* pDlg = (StreamServerDialog*) pParam;
+
+	// code found here for the dialog box in MSDN 
+
+
+	OPENFILENAME	ofn;				// common dialog box structure
+	char			szFile[260];        // buffer for file name
+	HANDLE			hf;					// file handle
+	Wav_Header		wav_header;			// header values for the file read
+
+
+	// Initialize OPENFILENAME
+	ZeroMemory(&ofn, sizeof(ofn));
+	ofn.lStructSize = sizeof(ofn);
+
+	ofn.hwndOwner = pDlg->DialogHandle;
+
+	ofn.lpstrFile = szFile;
+
+
+	// Set lpstrFile[0] to '\0' so that GetOpenFileName does not 
+	// use the contents of szFile to initialize itself.
+
+	ofn.lpstrFile[0] = '\0';
+	ofn.nMaxFile = sizeof(szFile);
+	ofn.lpstrFilter = "All\0*.*\0Wav\0*.Wav\0";
+	ofn.nFilterIndex = 1;
+	ofn.lpstrFileTitle = NULL;
+	ofn.nMaxFileTitle = 0;
+	ofn.lpstrInitialDir = NULL;
+	ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+
+	char	payload_string[128];
+
+	GetDlgItemText(pDlg->DialogHandle,IDC_COMBO1, payload_string,sizeof(payload_string) );
+
+	PAYLOAD_SIZE =atol(payload_string);	//convert string value to int 
+
+	// Display the Open dialog box. 
+	if (GetOpenFileName(&ofn)==TRUE) 
+	{
+
+	if (hf = CreateFile(ofn.lpstrFile,
+					GENERIC_READ, 
+					0, NULL,
+					OPEN_EXISTING,
+					0, 
+					NULL) )
+		{
+
+
+		char	str[16];
+		HWND	hWndEdit;
+		DWORD	dwBytes;
+
+		unsigned int	my_FileSize;		// get size of the whole file to be streamed.
+		
+		my_FileSize = GetFileSize(hf,NULL);
+
+		// read the header of the wav file and get its attributes 
+		ReadFile(hf,&wav_header,sizeof(wav_header),&dwBytes,NULL);
+		
+		strcpy(pDlg->my_File_To_Stream.FilePath,ofn.lpstrFile);
+
+		memcpy(&pDlg->my_File_To_Stream.wav_header,&wav_header,sizeof(wav_header));
+		
+		pDlg->my_File_To_Stream.file_size = my_FileSize - sizeof(wav_header);
+		
+		pDlg->my_File_To_Stream.numblocks = 0;
+		pDlg->my_File_To_Stream.remaining_bytes = 0;
+
+
+		// calculate the number of packets to be sent according to 
+		// the payload size we specified at the beginning of the file
+	
+		// remaining bytes should be the last packet to be sent whose
+		// size is smaller than the payload size.
+
+
+		if ((pDlg->my_File_To_Stream.file_size % PAYLOAD_SIZE) !=0) 
+		{
+		pDlg->my_File_To_Stream.numblocks = pDlg->my_File_To_Stream.file_size / PAYLOAD_SIZE;
+		pDlg->my_File_To_Stream.remaining_bytes = pDlg->my_File_To_Stream.file_size - (pDlg->my_File_To_Stream.numblocks * PAYLOAD_SIZE); // remainder is always in bytes
+		} else if ( (pDlg->my_File_To_Stream.file_size % PAYLOAD_SIZE) == 0) 
+		 pDlg->my_File_To_Stream.numblocks = pDlg->my_File_To_Stream.file_size / PAYLOAD_SIZE;
+
+		int	all_packets;
+	
+		if (pDlg->my_File_To_Stream.remaining_bytes==0)
+			all_packets = pDlg->my_File_To_Stream.numblocks;
+		else 
+			all_packets = pDlg->my_File_To_Stream.numblocks + 1;
+
+
+		pDlg->my_File_To_Stream.File_Loaded = true;	
+
+
+		// show how many packets we are about to send ..
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Packets);
+		sprintf(&str[0],"%d",all_packets);	
+		SendMessage(hWndEdit,EM_SETSEL,0,128000);
+		SendMessage(hWndEdit,EM_REPLACESEL,FALSE,(long)str);
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_PayloadSize);
+		sprintf(&str[0],"%d",PAYLOAD_SIZE);	
+		SendMessage(hWndEdit,EM_SETSEL,0,128000);
+		SendMessage(hWndEdit,EM_REPLACESEL,FALSE,(long)str);
+
+		
+		// update info on the file path on the dialog box 
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_FILEPATH);	
+		SendMessage(hWndEdit,EM_SETSEL,0,256000);
+		SendMessage(hWndEdit,EM_REPLACESEL,FALSE,(long)pDlg->my_File_To_Stream.FilePath);
+
+
+		// keep updating on the file attributes ..
+
+
+		// FormatTag
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,IDC_FormatTag);
+		sprintf(&str[0],"%d",pDlg->my_File_To_Stream.wav_header.wFormatTag);	
+		SendMessage(hWndEdit,EM_SETSEL,0,256000);
+		SendMessage(hWndEdit,EM_REPLACESEL,FALSE,(long)str);
+	
+		// Channels
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,IDC_Channels);
+		sprintf(&str[0],"%d",wav_header.nChannels);	
+		SendMessage(hWndEdit,EM_SETSEL,0,256000);
+		SendMessage(hWndEdit,EM_REPLACESEL,FALSE,(long)str);
+
+		// SamplesPerSecond
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,IDC_SamplesPerSec);
+		sprintf(&str[0],"%d",wav_header.nSamplesPerSec);	
+		SendMessage(hWndEdit,EM_SETSEL,0,256000);
+		SendMessage(hWndEdit,EM_REPLACESEL,FALSE,(long)str);
+
+		// AvgBytesPerSec
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,IDC_AvgBytesPerSec);
+		sprintf(&str[0],"%d",wav_header.nAvgBytesPerSec);	
+		SendMessage(hWndEdit,EM_SETSEL,0,256000);
+		SendMessage(hWndEdit,EM_REPLACESEL,FALSE,(long)str);
+
+		// BitsPerSample
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,IDC_BitsPerSample);
+		sprintf(&str[0],"%d",wav_header.nBitsPerSample);	
+		SendMessage(hWndEdit,EM_SETSEL,0,256000);
+		SendMessage(hWndEdit,EM_REPLACESEL,FALSE,(long)str);
+
+		// BitsPerSample
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,IDC_BlockAlign);
+		sprintf(&str[0],"%d",wav_header.nBlockAlign);	
+		SendMessage(hWndEdit,EM_SETSEL,0,128000);
+		SendMessage(hWndEdit,EM_REPLACESEL,FALSE,(long)str);	
+
+		// FILE SIZE
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_FILESIZE);
+		sprintf(&str[0],"%d",my_FileSize);	
+		SendMessage(hWndEdit,EM_SETSEL,0,128000);
+		SendMessage(hWndEdit,EM_REPLACESEL,FALSE,(long)str);
+
+
+
+		CloseHandle(hf); // close file .. we got the info we wanted.. 
+	
+
+		} // if (hf = CreateFile(ofn.lpstrFile, .....
+	
+
+  
+	} // 	if (GetOpenFileName(&ofn)==TRUE) ....
+
+
+
+} 
+
+///////////////////////////////////////////////////////////////////////////////////////
+
+
+void StreamServerDialog::StreamFile( StreamServerDialog *pDialog)
+{
+
+		// simply start the thread to send 
+
+		
+		StreamServerDialog* pDlg = (StreamServerDialog*) pDialog;
+	
+		pDlg->hMutexStopButton = CreateMutex(NULL,0,NULL);
+	
+		WaitForSingleObject(pDlg->hMutexStopButton,INFINITE);
+		pDlg->StopButton = false;
+		ReleaseMutex(pDlg->hMutexStopButton);
+
+
+
+		pDlg->hThread = CreateThread(
+        NULL,							// default security attributes 
+        0,								// use default stack size  
+		SendPacketsFromFile,			// thread function 
+        pDlg,							// pass pDlg so we can have access to the class 
+        0,								// use default creation flags 
+        &pDlg->dwThreadId);	
+}
+
+
+
+// function to show the bytes sent every 1 sec 
+void StreamServerDialog::UpdateThroughput(StreamServerDialog *pDialog)
+{
+
+		HWND	hWndEdit;
+		char str[16];
+
+		StreamServerDialog* pDlg = (StreamServerDialog*) pDialog;
+
+		pDlg->seconds_elapsed = pDlg->seconds_elapsed + 1; 
+	
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Timer);
+		sprintf(&str[0],"%u",pDlg->bytes_sent / pDlg->seconds_elapsed );	// get the throughput	
+		SendMessage(hWndEdit,EM_SETSEL,0,128000);
+		SendMessage(hWndEdit,EM_REPLACESEL,FALSE,(long)str);	
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_SecondsElapsed);
+		sprintf(&str[0],"%u",pDlg->seconds_elapsed );		
+		SendMessage(hWndEdit,EM_SETSEL,0,128000);
+		SendMessage(hWndEdit,EM_REPLACESEL,FALSE,(long)str);
+
+
+}
+
+bool StreamServerDialog::OnInit(HWND hWnd,StreamServerDialog *pParam) 
+{
+
+
+	StreamServerDialog* pDlg = (StreamServerDialog*) pParam;
+
+	
+	pDlg->DialogHandle	=	hWnd;
+
+	PAYLOAD_SIZE	=	0;		
+
+	
+	return true;
+
+}
+
+
+
+
+
+
+};  // END CLASS LISTINGS .................
+ 
+
+
+
+//////////////////// SendPacketsFromFile THREAD  ////////////////////////////////
+
+
+DWORD WINAPI SendPacketsFromFile(LPVOID lParam)
+{
+	
+
+	StreamServerDialog* pDlg = (StreamServerDialog*) lParam;
+
+	bool LocalStopButton = false;
+
+
+	unsigned char* buffer;
+	DWORD totalBufferSize = (size_t)sizeof(PAYLOAD_SIZE); 
+
+
+//	LPBYTE buffer;					// memory pointer 
+//	buffer =  (LPBYTE)GlobalAlloc(GPTR, (size_t)( sizeof(PAYLOAD_SIZE) ) );
+//	int *buffer =  (int*)GlobalAlloc(GPTR, (size_t)( sizeof(PAYLOAD_SIZE) ) );
+
+
+
+	if((buffer = (unsigned char*)HeapAlloc(
+        GetProcessHeap(), 
+        HEAP_ZERO_MEMORY, 
+        totalBufferSize
+    )) == NULL) {
+        MessageBox(NULL,"Memory allocation error","Error",NULL);
+        ExitProcess(1);
+    }
+
+
+	char			IPADDRESS[128];
+	char			PORT[128];
+	int				iPort;
+
+	GetDlgItemText(pDlg->DialogHandle,ID_IPAddress, IPADDRESS,sizeof(IPADDRESS) );
+//	Dotted_Decimal_IP_Address = inet_addr(ID_IPAddress);
+	GetDlgItemText(pDlg->DialogHandle,ID_Port, PORT,sizeof(PORT) );
+	iPort = atoi(PORT);
+
+	int packet_len = PAYLOAD_SIZE + sizeof(rtp_hrt_t);
+	int seq_num; 
+	int time_stamp;
+	int delay_packets = 0;
+
+
+	unsigned int	myTimerEvent=0;
+
+	bool			mySetTimer = false;
+
+	pDlg->bytes_sent	  = 0;
+	pDlg->seconds_elapsed = 0;
+
+
+
+	DWORD	readBytes = 0;
+	Wav_Header	wav_header;
+	struct timeval due, now;
+	int payload_frames = PAYLOAD_SIZE / pDlg->my_File_To_Stream.wav_header.nBlockAlign;
+	int payload_duration = payload_frames * ((float)1/pDlg->my_File_To_Stream.wav_header.nSamplesPerSec * 1000000);
+	int  delay = 0;
+	unsigned int a = 0;			// points to the number of packets send 
+	int max =0;
+	int mean_delay =0;
+	int delay_sum = 0;
+	int delay_counter = 0;
+
+
+	char str[16];
+
+	HWND	hWndEdit;
+
+//	HANDLE	hFile;
+
+
+
+	// The standard RTP header	stack. I don't use the optional fields 
+	header->version=2;
+	header->p=0;
+	header->x=0;
+	header->cc=0;
+	header->m=1;
+	header->pt = 10; // <----
+	// payload type = 10 look in RFC 3550 and RFC 3551
+	// RTP Profile for Audio and Video Conferences with Minimal Control:		
+
+	// payload Type   encoding name  media type       clock rate   channels                                        	
+	//	10				L16               A           44,100          2
+
+
+
+	// Initialise the sequence number and timestamp
+
+	header->seq = htons(rand());
+//	header->seq = header->seq & 65535;// this should round off around 65535. It's a 16 bit value.
+	header->ts =  htonl(rand());
+
+
+	 if((pDlg->hFile = CreateFile(pDlg->my_File_To_Stream.FilePath,
+		 GENERIC_READ,
+		 FILE_SHARE_READ,
+		 NULL,
+		 OPEN_EXISTING,
+		 0,
+		 NULL))
+     == INVALID_HANDLE_VALUE) 
+     {
+        MessageBox(NULL,"unable to open wav file","File Error",NULL);
+    //    ExitProcess(1);
+		CloseHandle(pDlg->hThread);
+
+    }
+
+	pDlg->my_File_To_Stream.sending_file = true;
+
+	// read the wav header so move forward by 44 bytes...
+
+	ReadFile(pDlg->hFile,&wav_header,sizeof(wav_header),&readBytes,NULL);
+
+
+	// create the socket for streaming ..  
+
+	if ((pDlg->my_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) 
+	{
+
+		MessageBox(NULL,"socket error","sock",NULL);		
+		CloseHandle(pDlg->hThread);
+
+	}
+
+
+	memset(&pDlg->SockAddr,0,sizeof(pDlg->SockAddr));
+
+	pDlg->SockAddr.sin_family		=	AF_INET;
+	pDlg->SockAddr.sin_port			=	htons(iPort);
+//	pDlg->SockAddr.sin_addr.s_addr	=	inet_addr("127.0.0.1");
+	pDlg->SockAddr.sin_addr.s_addr	=	inet_addr(IPADDRESS);
+
+
+	hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_PayloadDuration);
+	sprintf(&str[0],"%d",payload_duration);		
+	SetDlgItemText(pDlg->DialogHandle,ID_PayloadDuration,str);
+	
+	hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_FramesPerPacket);
+	sprintf(&str[0],"%d",payload_frames);		
+	SetDlgItemText(pDlg->DialogHandle,ID_FramesPerPacket,str);
+
+	hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_PayloadSize);
+	sprintf(&str[0],"%d",PAYLOAD_SIZE);	
+	SetDlgItemText(pDlg->DialogHandle,ID_PayloadSize,str);
+
+
+
+
+	//  Get the time now...
+	
+	pDlg->gettimeofday(&due);
+
+
+	//  START SENDING ... main loop 
+
+
+
+//	while (a < pDlg->my_File_To_Stream.numblocks)
+
+	while(!LocalStopButton) 
+	
+	{
+
+
+		seq_num		=  header->seq;
+		time_stamp  =  header->ts;
+
+
+		// Encode to network byte order 
+		//	header->seq = htons(seq_num);
+		//	header->ts  = htonl(time_stamp);
+
+		pDlg->add_usec2timeval( &due, payload_duration );	
+
+		if(!ReadFile(pDlg->hFile, buffer, PAYLOAD_SIZE, &readBytes, NULL))
+          //  break;
+		  LocalStopButton=true; 
+        if(readBytes == 0) {
+		//	printf("bytes read : 0 \n");
+		// hm we have reached the end of file
+          //  break;
+			LocalStopButton=true;
+		}
+
+		if(readBytes < sizeof(buffer))			
+           memset(buffer + readBytes, 0, sizeof(buffer) - readBytes);
+
+
+		// copy read data + header values to outpdata
+		memcpy(outpdata->buffer,header,sizeof(rtp_hrt_t));		
+		memcpy(outpdata->buffer + sizeof(rtp_hrt_t),buffer,readBytes);
+		outpdata->bufferlen = readBytes + sizeof(rtp_hrt_t);
+			
+		// How long do we wait to get the data?
+
+        pDlg->gettimeofday(&now);
+		delay = pDlg->diff_timeval(&due, &now);	
+		delay = delay / 1000;					// convert to milliseconds 
+
+		float fnow,fdue;
+
+		fnow = now.tv_sec + ((float)now.tv_usec / 1000000);
+		fdue = due.tv_sec + ((float)due.tv_usec / 1000000);
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Now);
+		sprintf(&str[0],"%f",fnow);		
+		SetDlgItemText(pDlg->DialogHandle,ID_Now,str);
+	
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Due);
+		sprintf(&str[0],"%f",fdue);		
+		SetDlgItemText(pDlg->DialogHandle,ID_Due,str);
+		
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Diff);
+		sprintf(&str[0],"%f",fdue-fnow);		
+		SetDlgItemText(pDlg->DialogHandle,ID_Diff,str);
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Delay);
+		sprintf(&str[0],"%d",delay / 2 );		
+		SetDlgItemText(pDlg->DialogHandle,ID_Delay,str);
+
+		if (delay > 0) 
+		{ 
+			Sleep( delay/2 );
+			delay_packets++;
+
+			if (delay > max ) 
+				max = delay;
+			
+			if (delay_counter == 0)	// set to prevent devision by zero. Should 
+				delay_counter++;	// run only once 
+
+			delay_counter++;
+			delay_sum = delay_sum + delay;
+			mean_delay = delay_sum / delay_counter;
+
+		}
+
+		
+	//  Time to send the packet 
+	if ( sendto(pDlg->my_socket,
+		(const char*)&outpdata->buffer,
+		outpdata->bufferlen,0, (struct sockaddr *)&(pDlg->SockAddr),
+		sizeof(pDlg->SockAddr) ) !=  (int)outpdata->bufferlen) 
+		{
+			MessageBox(NULL," could not send packets","File Streamer",NULL);
+			exit(-1);	
+		}
+	
+		// when we start sending for the first time we set the timer
+		// later on we do not need to reset it
+
+	if (mySetTimer == false) 
+		{
+			SetTimer(pDlg->DialogHandle,myTimerEvent,1000,NULL); // set interrupt every 1 sec 
+			mySetTimer = true;
+		}	
+	
+		
+		// get the real streamed data output ( only payload) 
+		pDlg->bytes_sent = pDlg->bytes_sent + outpdata->bufferlen - sizeof(rtp_hrt_t);
+
+
+		a++; // increment the counter . read next block of data from file
+
+
+		// Update RTP header fields
+		// increase timestamp by order of payload size / frame size
+		// Frame size for 44.1 khz, 2 channel, 16 bit audio is 2 * channels
+		header->ts = time_stamp + packet_len / (2* pDlg->my_File_To_Stream.wav_header.nChannels);
+		header->seq = seq_num + 1;
+
+		
+		// update the packets send 
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_PacketsSent);
+		sprintf(&str[0],"%d",a);	
+		SetDlgItemText(pDlg->DialogHandle,ID_PacketsSent,str);	
+
+
+		// update the packets send 
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_PacketLen);
+		sprintf(&str[0],"%d",packet_len);	
+		SetDlgItemText(pDlg->DialogHandle,ID_PacketLen,str);
+
+
+
+		// update the max delay
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_MaxDelay);
+		sprintf(&str[0],"%d",max);	
+		SetDlgItemText(pDlg->DialogHandle,ID_MaxDelay,str);	
+
+		// update the mean delay
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_MeanDelay);
+		sprintf(&str[0],"%d",mean_delay);	
+		SetDlgItemText(pDlg->DialogHandle,ID_MeanDelay,str);	
+
+		// update the mean delay
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_DelayPackets);
+		sprintf(&str[0],"%d",delay_packets);	
+		SetDlgItemText(pDlg->DialogHandle,ID_DelayPackets,str);	
+
+
+
+
+		/////////////// update dialog for RTP Header values ///////
+		
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Rtp_Version);
+		sprintf(&str[0],"%d",header->version );		
+		SetDlgItemText(pDlg->DialogHandle,ID_Rtp_Version,str);	
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Rtp_p);
+		sprintf(&str[0],"%d",header->p );		
+		SetDlgItemText(pDlg->DialogHandle,ID_Rtp_p,str);	
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Rtp_x);
+		sprintf(&str[0],"%d",header->x );		
+		SetDlgItemText(pDlg->DialogHandle,ID_Rtp_x,str);
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Rtp_cc);
+		sprintf(&str[0],"%d",header->cc );		
+		SetDlgItemText(pDlg->DialogHandle,ID_Rtp_cc,str);
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Rtp_m);
+		sprintf(&str[0],"%d",header->m );		
+		SetDlgItemText(pDlg->DialogHandle,ID_Rtp_m,str);
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Rtp_pt);
+		sprintf(&str[0],"%d",header->pt );		
+		SetDlgItemText(pDlg->DialogHandle,ID_Rtp_pt,str);
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Rtp_seq);
+		sprintf(&str[0],"%u",header->seq );		
+		SetDlgItemText(pDlg->DialogHandle,ID_Rtp_seq,str);
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Rtp_ts);
+		sprintf(&str[0],"%u",header->ts );		
+		SetDlgItemText(pDlg->DialogHandle,ID_Rtp_ts,str);
+
+
+
+		WaitForSingleObject(pDlg->hMutexStopButton,INFINITE);
+		LocalStopButton = pDlg->StopButton;
+		ReleaseMutex(pDlg->hMutexStopButton);
+
+
+
+
+
+		}	// end while (a < numberofBlock)
+
+
+/*
+
+	//	send the last bytes/packet left. check before that ..
+	if (pDlg->my_File_To_Stream.remaining_bytes > 0) 
+	
+	{
+
+		int seq_num    = header->seq;
+		int time_stamp = header->ts;
+
+		// Encode to network byte order 
+		//	header->seq = htons(seq_num);
+		//	header->ts  = htonl(time_stamp);
+
+
+	if(!ReadFile(hFile, buffer, pDlg->my_File_To_Stream.remaining_bytes, &readBytes, NULL))
+        //    break;
+        if(readBytes == 0) {
+		//	printf("bytes read : 0 \n");
+        //    break;
+		}
+		
+		if(readBytes < sizeof(buffer)) 
+            memset(buffer + readBytes, 0, sizeof(buffer) - readBytes);
+
+		// copy read data + header values to outpdata
+
+		memcpy(outpdata->buffer,header,sizeof(rtp_hrt_t));		
+		memcpy(outpdata->buffer + sizeof(rtp_hrt_t),buffer,readBytes);
+		outpdata->bufferlen = readBytes + sizeof(rtp_hrt_t);
+
+		// just send the last packet. no waiting... 
+	if ( sendto(pDlg->my_socket,
+		(const char*)&outpdata->buffer,
+		outpdata->bufferlen,0, (struct sockaddr *)&(pDlg->SockAddr),
+		sizeof(pDlg->SockAddr) ) !=  (int)outpdata->bufferlen) 
+		{
+			MessageBox(NULL," could not send last packet","File Streamer",NULL);
+			exit(-1);	
+		}
+	
+		pDlg->bytes_sent = pDlg->bytes_sent + outpdata->bufferlen - sizeof(rtp_hrt_t);
+		
+		// Update RTP header fields
+		// increase timestamp by order of payload size / frame size. frame size
+		// for 44.1 khz, 2 channel, 16 bit audio is 2 * channels
+		header->ts = time_stamp + packet_len / (2* pDlg->my_File_To_Stream.wav_header.nChannels);
+		header->seq = seq_num + 1;
+
+			
+		// update the packets send 
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_PacketsSent);
+		sprintf(&str[0],"%d",a);	
+		SetDlgItemText(pDlg->DialogHandle,ID_PacketsSent,str);	
+
+
+		// update the packets send 
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_PacketLen);
+		sprintf(&str[0],"%d",packet_len);	
+		SetDlgItemText(pDlg->DialogHandle,ID_PacketLen,str);
+
+
+
+		// update the max delay
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_MaxDelay);
+		sprintf(&str[0],"%d",max);	
+		SetDlgItemText(pDlg->DialogHandle,ID_MaxDelay,str);	
+
+		// update the mean delay
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_MeanDelay);
+		sprintf(&str[0],"%d",mean_delay);	
+		SetDlgItemText(pDlg->DialogHandle,ID_MeanDelay,str);	
+
+		// update the mean delay
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_DelayPackets);
+		sprintf(&str[0],"%d",delay_packets);	
+		SetDlgItemText(pDlg->DialogHandle,ID_DelayPackets,str);	
+
+		/////////////// updata dialog for RTP Header values ///////
+		
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Rtp_Version);
+		sprintf(&str[0],"%d",header->version );		
+		SetDlgItemText(pDlg->DialogHandle,ID_Rtp_Version,str);	
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Rtp_p);
+		sprintf(&str[0],"%d",header->p );		
+		SetDlgItemText(pDlg->DialogHandle,ID_Rtp_p,str);	
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Rtp_x);
+		sprintf(&str[0],"%d",header->x );		
+		SetDlgItemText(pDlg->DialogHandle,ID_Rtp_x,str);
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Rtp_cc);
+		sprintf(&str[0],"%d",header->cc );		
+		SetDlgItemText(pDlg->DialogHandle,ID_Rtp_cc,str);
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Rtp_m);
+		sprintf(&str[0],"%d",header->m );		
+		SetDlgItemText(pDlg->DialogHandle,ID_Rtp_m,str);
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Rtp_pt);
+		sprintf(&str[0],"%d",header->pt );		
+		SetDlgItemText(pDlg->DialogHandle,ID_Rtp_pt,str);
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Rtp_seq);
+		sprintf(&str[0],"%u",header->seq );		
+		SetDlgItemText(pDlg->DialogHandle,ID_Rtp_seq,str);
+
+		hWndEdit = GetDlgItem(pDlg->DialogHandle,ID_Rtp_ts);
+		sprintf(&str[0],"%u",header->ts );		
+		SetDlgItemText(pDlg->DialogHandle,ID_Rtp_ts,str);
+
+	
+
+	} // last packet send. kill thread, close socket, etc ..
+
+*/
+
+
+	if (pDlg->my_File_To_Stream.sending_file = true)
+		pDlg->my_File_To_Stream.sending_file = false;
+	
+	CloseHandle(pDlg->hFile);
+
+	HeapFree(GetProcessHeap(), 0, buffer);
+//	GlobalFree((HGLOBAL)buffer);
+
+	KillTimer(pDlg->DialogHandle,myTimerEvent);
+	CloseHandle(pDlg->hThread);
+	CloseHandle(pDlg->hMutexStopButton);
+
+	closesocket(pDlg->my_socket);
+	
+	return 0;	
+	
+
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+
+//////////////////////////// GLOBAL FUNCTIONS /////////////////////////////////////////////
+
+
+int CALLBACK DialogProc(HWND hDlg, UINT MSG, WPARAM wParam, LPARAM lParam)
+{
+
+	// STEP # 2	
+
+
+	StreamServerDialog	*pDialog;
+
+
+	pDialog = (StreamServerDialog *) GetWindowLong(hDlg,DWL_USER);
+
+	const char *PayloadValues[] = { "128", "256", "384",
+                                "512", "640", "768",
+                                "896", "1024", "1280",
+                                "1401" };
+
+
+	switch(MSG)
+	{
+	
+	
+		case WM_TIMER: 
+			pDialog->UpdateThroughput((StreamServerDialog *) pDialog);
+		break;  
+		
+		case WM_COMMAND:
+
+
+					switch(LOWORD(wParam)) 
+					{
+						case ID_OK:
+							EndDialog(hDlg, 0);
+						break;
+					
+						case ID_CANCEL:
+							 EndDialog(hDlg, 0);
+						break;
+
+						case ID_STOP:
+							WaitForSingleObject(pDialog->hMutexStopButton,INFINITE);
+							pDialog->StopButton = true;
+							ReleaseMutex(pDialog->hMutexStopButton);
+
+						//	 EndDialog(hDlg, 0);
+						break;
+						
+						case ID_GETFILE:
+							pDialog->OnGetFile((StreamServerDialog *) pDialog);
+						break;
+						case ID_Stream_File:
+							pDialog->StreamFile((StreamServerDialog *) pDialog);
+						break;
+
+					}
+		break;
+			
+		case WM_INITDIALOG:			
+			
+			HWND	item;
+
+			item = GetDlgItem(hDlg,IDC_COMBO1);
+
+			for (int i = 0; i < 10; i++)  
+			{
+					   SendMessage(item,
+                       (UINT)CB_INSERTSTRING,
+                       (WPARAM)-1,
+                        reinterpret_cast<LPARAM>((LPCTSTR)PayloadValues[i]));
+			}
+			
+			SendMessage(item, CB_SETCURSEL, 8, 0);
+
+			SetWindowLong(hDlg,DWL_USER,lParam);
+			pDialog =  (StreamServerDialog*) lParam;					
+			return pDialog->OnInit(hDlg,(StreamServerDialog *) pDialog); // true 
+			
+	} //switch(MSG)
+
+	return false;
+
+
+}
+
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
+{
+ 
+	// STEP #1 
+	
+
+	WSADATA					ws_data;
+
+	WORD					w_Version_Requested;
+		
+	StreamServerDialog		myStreamServerDialog;
+
+	w_Version_Requested =	MAKEWORD(1,1);
+
+	WSAStartup(w_Version_Requested,&ws_data);
+ 
+	DialogBoxParam(hInstance,MAKEINTRESOURCE(IDD_DIALOG1),NULL,DialogProc,
+		(long)&myStreamServerDialog);
+
+	closesocket(myStreamServerDialog.my_socket);
+
+	WSACleanup();
+
+	return(0);
+}

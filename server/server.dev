@@ -1,0 +1,83 @@
+[Project]
+FileName=C:\my_work2\a_ Last_good_projects\_ Almost_there\streaming_server\server\server.dev
+Name=server
+Ver=1
+IsCpp=1
+Type=0
+Compiler=-D__GNUWIN32__ -W -DWIN32 -DNDEBUG -D_WINDOWS -D_MBCS 
+CppCompiler=-D__GNUWIN32__ -W -DWIN32 -DNDEBUG -D_WINDOWS -D_MBCS 
+Includes=
+Linker=-lkernel32 -luser32 -lgdi32 -lwinspool -lcomdlg32 -ladvapi32 -lshell32 -lole32 -loleaut32 -luuid -lodbc32 -lodbccp32 
+Libs=
+UnitCount=10
+Folders="Source Files","Header Files","Resource Files"
+[Unit1]
+FileName=./server.cpp
+Folder="Source Files"
+Compile=1
+CompileCpp=1
+Link=1
+Priority=1000
+[Unit2]
+FileName=./server.rc
+Folder="Source Files"
+Compile=1
+CompileCpp=1
+Link=0
+Priority=1000
+[Unit3]
+FileName=./StdAfx.cpp
+Folder="Source Files"
+Compile=1
+CompileCpp=1
+Link=1
+Priority=1000
+[Unit4]
+FileName=./StdAfx.h
+Folder="Header Files"
+Compile=1
+CompileCpp=1
+Link=1
+Priority=1000
+[Unit5]
+FileName=./Wav_Header.h
+Folder="Header Files"
+Compile=1
+CompileCpp=1
+Link=1
+Priority=1000
+[Unit6]
+FileName=./backup.txt
+Folder=
+Compile=0
+CompileCpp=0
+Link=0
+Priority=1000
+[Unit7]
+FileName=./backup3.txt
+Folder=
+Compile=0
+CompileCpp=0
+Link=0
+Priority=1000
+[Unit8]
+FileName=./backup4.txt
+Folder=
+Compile=0
+CompileCpp=0
+Link=0
+Priority=1000
+[Unit9]
+FileName=./mutex_threads.txt
+Folder=
+Compile=0
+CompileCpp=0
+Link=0
+Priority=1000
+[Unit10]
+FileName=./ReadMe.txt
+Folder=
+Compile=0
+CompileCpp=0
+Link=0
+Priority=1000

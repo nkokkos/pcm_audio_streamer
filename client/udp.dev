@@ -1,0 +1,34 @@
+[Project]
+FileName=D:\_Projects\_diplomatiki_paper\streaming_client\udp.dev
+Name=udp
+Ver=1
+IsCpp=1
+Type=0
+Compiler=-D__GNUWIN32__ -W -DWIN32 -DNDEBUG -D_WINDOWS -D_MBCS 
+CppCompiler=-D__GNUWIN32__ -W -DWIN32 -DNDEBUG -D_WINDOWS -D_MBCS 
+Includes=
+Linker=-lkernel32 -luser32 -lgdi32 -lwinspool -lcomdlg32 -ladvapi32 -lshell32 -lole32 -loleaut32 -luuid -lodbc32 -lodbccp32 
+Libs=
+UnitCount=3
+Folders="Source Files","Header Files","Resource Files"
+[Unit1]
+FileName=./udp.cpp
+Folder="Source Files"
+Compile=1
+CompileCpp=1
+Link=1
+Priority=1000
+[Unit2]
+FileName=./udp.rc
+Folder="Source Files"
+Compile=1
+CompileCpp=1
+Link=0
+Priority=1000
+[Unit3]
+FileName=./backup.txt
+Folder=
+Compile=0
+CompileCpp=0
+Link=0
+Priority=1000
